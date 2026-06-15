@@ -4,14 +4,14 @@ import sys
 from functools import lru_cache
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.agent_service import AgentService
 from app.errors import AgentServiceError
-from app.schema import Artifact, MessageData, MessageRequest
+from app.schema import Artifact, MessageData, MessageRequest, ReviewJobData, ReviewRequest
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -36,6 +36,14 @@ def get_agent_service() -> AgentService:
     # suite and `import app.main` need no framework install.
     from app.llm_agent import build_agent_service
     return build_agent_service()
+
+
+@lru_cache
+def get_review_service():
+    # Lazy import keeps agent_framework out of the module import graph, so the test
+    # suite and `import app.main` need no framework install.
+    from app.llm_agent import build_review_service
+    return build_review_service()
 
 
 @app.get("/health")
@@ -66,6 +74,27 @@ async def message(
         else None
     )
     data = MessageData(session_id=body.session_id, reply=result.text, artifact=artifact)
+    return {"success": True, "data": data.model_dump()}
+
+
+@app.post("/api/v1/review")
+async def review(
+    body: ReviewRequest,
+    background: BackgroundTasks,
+    authorization: Optional[str] = Header(default=None),
+    svc=Depends(get_review_service),
+) -> dict:
+    jwt = _bearer_token(authorization)
+    job_id, key = await svc.start(
+        jwt=jwt, article_id=body.article_id, workspace_id=body.workspace_id
+    )
+    background.add_task(
+        svc.run,
+        key=key, job_id=job_id, rubrics=body.rubrics,
+        current_content=body.current_content, previous_content=body.previous_content,
+        feedbacks=[fb.model_dump() for fb in body.feedbacks],
+    )
+    data = ReviewJobData(job_id=job_id)
     return {"success": True, "data": data.model_dump()}
 
 
