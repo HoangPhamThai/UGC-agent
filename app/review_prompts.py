@@ -6,18 +6,19 @@ RUBRIC_PARSE_PROMPT = """You split a QC reviewer's rubric text into two buckets.
 Return JSON with two string arrays: {"text": [...], "image": [...]}.
 Put requirements about wording, structure, grammar, or written content into "text".
 Put requirements about pictures, figures, or visuals into "image".
-A single rubric line may map to one bucket. Omit empty buckets' items (use []).
-
-Rubrics:
-{rubrics}"""
+A single rubric line may map to one bucket. Omit empty buckets' items (use [])."""
 
 _REVIEW_INSTRUCTIONS = """You are a QC assistant. Produce ONE concise finding (1-3 sentences,
 in the rubric's language) that helps the reviewer act fast. If the content satisfies the
-rubric, say so briefly. Include a short location hint when useful. Do not invent issues."""
+rubric, say so briefly. If something falls short or could be better, point it out AND add a
+concrete suggestion for how to fix or improve it. Include a short location hint when useful.
+Do not invent issues."""
 
 
 def build_rubric_parse_prompt(rubrics: str) -> str:
-    return RUBRIC_PARSE_PROMPT.format(rubrics=rubrics)
+    # Append via f-string, not str.format: RUBRIC_PARSE_PROMPT contains literal JSON
+    # braces ({"text": ...}) that str.format would misread as format fields.
+    return f"{RUBRIC_PARSE_PROMPT}\n\nRubrics:\n{rubrics}"
 
 
 def build_rubric_review_prompt(*, rubric: str, content: str) -> str:
