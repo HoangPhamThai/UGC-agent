@@ -8,7 +8,11 @@ from agent_framework.openai import OpenAIChatCompletionClient
 
 from app.agent_service import AgentService, ChatTurn
 from app.backend_client import BackendClient
+from app.review_parse import parse_buckets
+from app.review_prompts import build_rubric_parse_prompt
+from app.review_service import ReviewService
 from app.settings import settings
+from app.settings import settings as _settings
 
 
 class AgentFrameworkRunner:
@@ -30,6 +34,42 @@ class AgentFrameworkRunner:
         ]
         result = await agent.run(af_messages)
         return result.text
+
+
+class AgentFrameworkReviewRunner:
+    """ReviewRunner backed by agent-framework. Text reviews are plain prompts;
+    image reviews attach image URLs as multimodal content."""
+
+    def __init__(self, chat_client: OpenAIChatCompletionClient) -> None:
+        self._client = chat_client
+
+    async def parse_rubrics(self, rubrics: str) -> dict:
+        agent = self._client.as_agent(name="rubric-parser", instructions="", tools=[])
+        msg = Message(role="user", contents=[Content.from_text(build_rubric_parse_prompt(rubrics))])
+        result = await agent.run([msg])
+        return parse_buckets(result.text)
+
+    async def review(self, prompt: str, *, image_urls=None) -> str:
+        agent = self._client.as_agent(name="qc-reviewer", instructions="", tools=[])
+        contents = [Content.from_text(prompt)]
+        for url in (image_urls or []):
+            contents.append(Content.from_uri(url, media_type="image/*"))
+        result = await agent.run([Message(role="user", contents=contents)])
+        return result.text
+
+
+def build_review_service() -> ReviewService:
+    http_client = httpx.AsyncClient(timeout=_settings.request_timeout)
+    backend = BackendClient(http_client, _settings.backend_url)
+    chat_client = OpenAIChatCompletionClient(
+        model=_settings.llm_model, api_key=_settings.llm_api_key,
+        base_url=_settings.llm_base_url or None,
+    )
+    return ReviewService(
+        backend=backend, runner=AgentFrameworkReviewRunner(chat_client),
+        concurrency=_settings.review_concurrency,
+        deadline_seconds=_settings.review_deadline_seconds,
+    )
 
 
 def build_agent_service() -> AgentService:
