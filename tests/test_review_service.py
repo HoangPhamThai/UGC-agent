@@ -19,8 +19,9 @@ class FakeBackend:
     async def revoke_interim_key(self, key):
         self.revoked.append(key)
 
-    async def create_review_job(self, key, *, article_id, workspace_id):
+    async def create_review_job(self, key, *, article_id, workspace_id, rubrics=""):
         self.created = (article_id, workspace_id)
+        self.rubrics = rubrics
         return "rj_1"
 
     async def set_review_total(self, key, job_id, total):
@@ -55,10 +56,11 @@ async def test_create_returns_job_id_and_key():
     backend = FakeBackend()
     svc = ReviewService(backend=backend, runner=FakeRunner({"text": [], "image": []}),
                          concurrency=10, deadline_seconds=600)
-    job_id, key = await svc.start(jwt="jwt", article_id="a_1", workspace_id="w_1")
+    job_id, key = await svc.start(jwt="jwt", article_id="a_1", workspace_id="w_1", rubrics="r")
     assert job_id == "rj_1"
     assert key == "k1"
     assert backend.created == ("a_1", "w_1")
+    assert backend.rubrics == "r"
 
 
 async def test_run_text_rubric_and_feedback_tasks_set_total_and_append():

@@ -141,11 +141,11 @@ class BackendClient:
         return await self._stat_get(f"/api/v1/statistics/qcs/{qc_id}/articles", key,
                                     self._stat_params(from_=from_, to=to, product=product, page=page, limit=limit))
 
-    async def create_review_job(self, key: str, *, article_id: str, workspace_id: str) -> str:
+    async def create_review_job(self, key: str, *, article_id: str, workspace_id: str, rubrics: str = "") -> str:
         resp = await self._request(
             "POST", "/api/v1/review-jobs",
             headers=self._key_headers(key),
-            json={"article_id": article_id, "workspace_id": workspace_id},
+            json={"article_id": article_id, "workspace_id": workspace_id, "rubrics": rubrics},
         )
         self._raise_for_status(resp)
         return self._data(resp)["job_id"]

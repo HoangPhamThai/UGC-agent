@@ -14,10 +14,12 @@ async def test_create_review_job_returns_id():
         assert request.method == "POST"
         assert request.url.path == "/api/v1/review-jobs"
         assert request.headers["X-Interim-Key"] == "k1"
+        assert b'"rubrics"' in request.content
+        assert b"be concise" in request.content
         return httpx.Response(201, json={"success": True, "data": {"job_id": "rj_9"}})
 
     out = await _client(handler).create_review_job(
-        "k1", article_id="a_1", workspace_id="w_1"
+        "k1", article_id="a_1", workspace_id="w_1", rubrics="be concise"
     )
     assert out == "rj_9"
 

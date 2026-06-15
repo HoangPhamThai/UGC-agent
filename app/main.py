@@ -86,7 +86,7 @@ async def review(
 ) -> dict:
     jwt = _bearer_token(authorization)
     job_id, key = await svc.start(
-        jwt=jwt, article_id=body.article_id, workspace_id=body.workspace_id
+        jwt=jwt, article_id=body.article_id, workspace_id=body.workspace_id, rubrics=body.rubrics
     )
     background.add_task(
         svc.run,

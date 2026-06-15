@@ -44,13 +44,13 @@ class ReviewService:
     concurrency: int
     deadline_seconds: float
 
-    async def start(self, *, jwt: str, article_id: str, workspace_id: str) -> tuple[str, str]:
+    async def start(self, *, jwt: str, article_id: str, workspace_id: str, rubrics: str) -> tuple[str, str]:
         """Synchronous part: mint ONE interim key, create the job, return (job_id, key).
         The key is handed to run(), which reuses it for every write and revokes it at
         the end — one key for the whole job, per the design decision."""
         key, _ = await self.backend.issue_interim_key(jwt)
         job_id = await self.backend.create_review_job(
-            key, article_id=article_id, workspace_id=workspace_id
+            key, article_id=article_id, workspace_id=workspace_id, rubrics=rubrics
         )
         return job_id, key
 

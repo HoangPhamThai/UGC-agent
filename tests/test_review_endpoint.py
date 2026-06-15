@@ -9,7 +9,7 @@ class StubReviewService:
         self.started = None
         self.ran = False
 
-    async def start(self, *, jwt, article_id, workspace_id):
+    async def start(self, *, jwt, article_id, workspace_id, rubrics):
         self.started = (jwt, article_id, workspace_id)
         return ("rj_42", "k1")
 
