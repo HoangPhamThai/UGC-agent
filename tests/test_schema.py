@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schema import MessageRequest, MessageData
+from app.schema import MessageRequest
 
 
 def test_message_request_valid():
@@ -14,8 +14,3 @@ def test_message_request_rejects_empty():
         MessageRequest(session_id="", message="hi")
     with pytest.raises(ValidationError):
         MessageRequest(session_id="cs_1", message="")
-
-
-def test_message_data_shape():
-    d = MessageData(session_id="cs_1", reply="hi there")
-    assert d.model_dump() == {"session_id": "cs_1", "reply": "hi there", "artifact": None}

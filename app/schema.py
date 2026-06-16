@@ -9,17 +9,6 @@ class MessageRequest(BaseModel):
     message: str = Field(..., min_length=1)
 
 
-class Artifact(BaseModel):
-    title: str
-    markdown: str
-
-
-class MessageData(BaseModel):
-    session_id: str
-    reply: str
-    artifact: Optional[Artifact] = None
-
-
 class FeedbackInput(BaseModel):
     id: str
     body: str

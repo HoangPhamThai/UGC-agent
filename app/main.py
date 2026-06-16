@@ -1,4 +1,5 @@
 # agents/app/main.py
+import json
 import logging
 import sys
 from functools import lru_cache
@@ -7,12 +8,15 @@ from typing import Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.agent_service import AgentService
+from app.agent_service import (
+    AgentService, StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent, ErrorEvent,
+    StreamEvent,
+)
 from app.errors import AgentServiceError
 from app.schema import (
-    AnalyzeRulesJobData, AnalyzeRulesRequest, Artifact, MessageData, MessageRequest,
+    AnalyzeRulesJobData, AnalyzeRulesRequest, MessageRequest,
     ReviewJobData, ReviewRequest,
 )
 
@@ -69,21 +73,46 @@ def _bearer_token(authorization: Optional[str]) -> str:
     return token
 
 
+_EVENT_NAMES = {
+    StatusEvent: "status",
+    DeltaEvent: "delta",
+    ArtifactEvent: "artifact",
+    DoneEvent: "done",
+    ErrorEvent: "error",
+}
+
+
+def _sse_frame(event: StreamEvent) -> str:
+    name = _EVENT_NAMES[type(event)]
+    payload = json.dumps(event.__dict__, ensure_ascii=False)
+    return f"event: {name}\ndata: {payload}\n\n"
+
+
 @app.post("/api/v1/message")
 async def message(
     body: MessageRequest,
     authorization: Optional[str] = Header(default=None),
     svc: AgentService = Depends(get_agent_service),
-) -> dict:
-    jwt = _bearer_token(authorization)
-    result = await svc.handle_message(jwt=jwt, session_id=body.session_id, user_text=body.message)
-    artifact = (
-        Artifact(title=result.artifact.title, markdown=result.artifact.markdown)
-        if result.artifact
-        else None
+):
+    jwt = _bearer_token(authorization)  # raises 401 before any stream frame
+
+    async def event_stream():
+        try:
+            async for ev in svc.stream_message(
+                jwt=jwt, session_id=body.session_id, user_text=body.message
+            ):
+                yield _sse_frame(ev)
+        except AgentServiceError as e:
+            yield _sse_frame(ErrorEvent(message=str(e)))
+        except Exception:  # noqa: BLE001 - never leave the client with a truncated, frame-less stream
+            logging.exception("Unexpected error while streaming agent reply")
+            yield _sse_frame(ErrorEvent(message="Đã xảy ra lỗi khi xử lý yêu cầu."))
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-    data = MessageData(session_id=body.session_id, reply=result.text, artifact=artifact)
-    return {"success": True, "data": data.model_dump()}
 
 
 @app.post("/api/v1/review")
