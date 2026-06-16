@@ -1,12 +1,10 @@
 # agents/app/llm_agent.py
 # This is the ONLY file in this service that imports agent_framework.
-from collections.abc import Callable
-
 import httpx
-from agent_framework import Content, Message, tool
+from agent_framework import Content, FunctionCallContent, Message, tool
 from agent_framework.openai import OpenAIChatCompletionClient
 
-from app.agent_service import AgentService, ChatTurn
+from app.agent_service import AgentService, ChatTurn, StatusItem, TextItem
 from app.backend_client import BackendClient
 from app.review_parse import parse_buckets
 from app.review_prompts import build_rubric_parse_prompt
@@ -22,19 +20,30 @@ class AgentFrameworkRunner:
     def __init__(self, chat_client: OpenAIChatCompletionClient) -> None:
         self._client = chat_client
 
-    async def run(self, *, instructions: str, tools: list[Callable], messages: list[ChatTurn]) -> str:
+    # Assumes agent.run_stream yields incremental updates that expose .text (a
+    # text delta) and .contents (which may include FunctionCallContent carrying
+    # .name). Verified manually against agent-framework-openai at integration
+    # time; the unit suite exercises a stub runner instead.
+    async def run_stream(self, *, instructions, tools, messages):
         wrapped_tools = [tool(fn) for fn in tools]
         agent = self._client.as_agent(
-            name="ugc-analytics",
-            instructions=instructions,
-            tools=wrapped_tools,
+            name="ugc-analytics", instructions=instructions, tools=wrapped_tools,
         )
         af_messages = [
-            Message(role=t.role, contents=[Content.from_text(t.content)])
-            for t in messages
+            Message(role=t.role, contents=[Content.from_text(t.content)]) for t in messages
         ]
-        result = await agent.run(af_messages)
-        return result.text
+        seen_tools: set[str] = set()
+        async for update in agent.run_stream(af_messages):
+            for content in getattr(update, "contents", []) or []:
+                if isinstance(content, FunctionCallContent):
+                    name = getattr(content, "name", "") or ""
+                    marker = getattr(content, "call_id", None) or name
+                    if name and marker not in seen_tools:
+                        seen_tools.add(marker)
+                        yield StatusItem(tool=name)
+            text = getattr(update, "text", "") or ""
+            if text:
+                yield TextItem(text=text)
 
 
 class AgentFrameworkReviewRunner:
