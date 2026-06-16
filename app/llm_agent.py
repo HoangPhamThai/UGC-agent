@@ -10,6 +10,7 @@ from app.agent_service import AgentService, ChatTurn
 from app.backend_client import BackendClient
 from app.review_parse import parse_buckets
 from app.review_prompts import build_rubric_parse_prompt
+from app.analyze_rules_service import AnalyzeRulesService
 from app.review_service import ReviewService
 from app.settings import settings
 from app.settings import settings as _settings
@@ -58,6 +59,18 @@ class AgentFrameworkReviewRunner:
         return result.text
 
 
+class AgentFrameworkRulesRunner:
+    """RulesRunner backed by agent-framework. Single prompt → JSON IR reply."""
+
+    def __init__(self, chat_client: OpenAIChatCompletionClient) -> None:
+        self._client = chat_client
+
+    async def analyze(self, prompt: str) -> str:
+        agent = self._client.as_agent(name="rules-analyzer", instructions="", tools=[])
+        result = await agent.run([Message(role="user", contents=[Content.from_text(prompt)])])
+        return result.text
+
+
 def build_review_service() -> ReviewService:
     http_client = httpx.AsyncClient(timeout=_settings.request_timeout)
     backend = BackendClient(http_client, _settings.backend_url)
@@ -68,6 +81,19 @@ def build_review_service() -> ReviewService:
     return ReviewService(
         backend=backend, runner=AgentFrameworkReviewRunner(chat_client),
         concurrency=_settings.review_concurrency,
+        deadline_seconds=_settings.review_deadline_seconds,
+    )
+
+
+def build_analyze_rules_service() -> AnalyzeRulesService:
+    http_client = httpx.AsyncClient(timeout=_settings.request_timeout)
+    backend = BackendClient(http_client, _settings.backend_url)
+    chat_client = OpenAIChatCompletionClient(
+        model=_settings.llm_model, api_key=_settings.llm_api_key,
+        base_url=_settings.llm_base_url or None,
+    )
+    return AnalyzeRulesService(
+        backend=backend, runner=AgentFrameworkRulesRunner(chat_client),
         deadline_seconds=_settings.review_deadline_seconds,
     )
 

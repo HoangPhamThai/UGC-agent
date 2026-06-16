@@ -11,7 +11,10 @@ from fastapi.responses import JSONResponse
 
 from app.agent_service import AgentService
 from app.errors import AgentServiceError
-from app.schema import Artifact, MessageData, MessageRequest, ReviewJobData, ReviewRequest
+from app.schema import (
+    AnalyzeRulesJobData, AnalyzeRulesRequest, Artifact, MessageData, MessageRequest,
+    ReviewJobData, ReviewRequest,
+)
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -44,6 +47,12 @@ def get_review_service():
     # suite and `import app.main` need no framework install.
     from app.llm_agent import build_review_service
     return build_review_service()
+
+
+@lru_cache
+def get_analyze_rules_service():
+    from app.llm_agent import build_analyze_rules_service
+    return build_analyze_rules_service()
 
 
 @app.get("/health")
@@ -96,6 +105,19 @@ async def review(
     )
     data = ReviewJobData(job_id=job_id)
     return {"success": True, "data": data.model_dump()}
+
+
+@app.post("/api/v1/analyze-rules")
+async def analyze_rules(
+    body: AnalyzeRulesRequest,
+    background: BackgroundTasks,
+    authorization: Optional[str] = Header(default=None),
+    svc=Depends(get_analyze_rules_service),
+) -> dict:
+    jwt = _bearer_token(authorization)
+    job_id, key = await svc.start(jwt=jwt, markdown=body.markdown)
+    background.add_task(svc.run, key=key, job_id=job_id, markdown=body.markdown)
+    return {"success": True, "data": AnalyzeRulesJobData(job_id=job_id).model_dump()}
 
 
 def _envelope(message: str) -> dict:
