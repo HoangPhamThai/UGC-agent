@@ -170,3 +170,32 @@ class BackendClient:
             headers=self._key_headers(key), json={"status": status},
         )
         self._raise_for_status(resp)
+
+    async def get_field_registry(self, key: str) -> list:
+        resp = await self._request(
+            "GET", "/api/v1/report-rules/registry", headers=self._key_headers(key)
+        )
+        self._raise_for_status(resp)
+        return self._data(resp)
+
+    async def create_rule_job(self, key: str, *, source_markdown: str) -> str:
+        resp = await self._request(
+            "POST", "/api/v1/report-rule-jobs",
+            headers=self._key_headers(key), json={"source_markdown": source_markdown},
+        )
+        self._raise_for_status(resp)
+        return self._data(resp)["job_id"]
+
+    async def set_rule_job_result(self, key: str, job_id: str, *, ir: dict, warnings: list) -> None:
+        resp = await self._request(
+            "PATCH", f"/api/v1/report-rule-jobs/{job_id}",
+            headers=self._key_headers(key), json={"ir": ir, "warnings": warnings},
+        )
+        self._raise_for_status(resp)
+
+    async def finalize_rule_job(self, key: str, job_id: str, status: str) -> None:
+        resp = await self._request(
+            "PATCH", f"/api/v1/report-rule-jobs/{job_id}",
+            headers=self._key_headers(key), json={"status": status},
+        )
+        self._raise_for_status(resp)

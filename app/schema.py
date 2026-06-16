@@ -37,3 +37,11 @@ class ReviewRequest(BaseModel):
 
 class ReviewJobData(BaseModel):
     job_id: str
+
+
+class AnalyzeRulesRequest(BaseModel):
+    markdown: str = Field(..., min_length=1)
+
+
+class AnalyzeRulesJobData(BaseModel):
+    job_id: str
