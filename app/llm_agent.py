@@ -1,8 +1,26 @@
 # agents/app/llm_agent.py
 # This is the ONLY file in this service that imports agent_framework.
 import httpx
-from agent_framework import Content, FunctionCallContent, Message, tool
+from agent_framework import Content, Message, tool
 from agent_framework.openai import OpenAIChatCompletionClient
+
+try:  # FunctionCallContent is not exported at the top level in every framework version.
+    from agent_framework import FunctionCallContent  # type: ignore
+except ImportError:  # pragma: no cover - import path varies by agent_framework version
+    FunctionCallContent = None
+
+
+def _is_function_call(content) -> bool:
+    """Whether a streamed content item is a tool/function call.
+
+    `FunctionCallContent` is not reliably importable across agent_framework
+    versions, so we fall back to duck-typing: a function-call content carries a
+    function `name` and no text, whereas a text content carries `.text`."""
+    if FunctionCallContent is not None and isinstance(content, FunctionCallContent):
+        return True
+    if type(content).__name__ in ("FunctionCallContent", "FunctionCall"):
+        return True
+    return bool(getattr(content, "name", None)) and not getattr(content, "text", None)
 
 from app.agent_service import AgentService, ChatTurn, StatusItem, TextItem
 from app.backend_client import BackendClient
@@ -21,9 +39,10 @@ class AgentFrameworkRunner:
         self._client = chat_client
 
     # Assumes agent.run_stream yields incremental updates that expose .text (a
-    # text delta) and .contents (which may include FunctionCallContent carrying
-    # .name). Verified manually against agent-framework-openai at integration
-    # time; the unit suite exercises a stub runner instead.
+    # text delta) and .contents (which may include a function-call content
+    # carrying .name). Tool-call detection is via _is_function_call (duck-typed)
+    # so it does not depend on importing a specific content class. The unit suite
+    # exercises a stub runner instead.
     async def run_stream(self, *, instructions, tools, messages):
         wrapped_tools = [tool(fn) for fn in tools]
         agent = self._client.as_agent(
@@ -35,7 +54,7 @@ class AgentFrameworkRunner:
         seen_tools: set[str] = set()
         async for update in agent.run_stream(af_messages):
             for content in getattr(update, "contents", []) or []:
-                if isinstance(content, FunctionCallContent):
+                if _is_function_call(content):
                     name = getattr(content, "name", "") or ""
                     marker = getattr(content, "call_id", None) or name
                     if name and marker not in seen_tools:
