@@ -20,6 +20,8 @@ def _is_function_call(content) -> bool:
         return True
     if type(content).__name__ in ("FunctionCallContent", "FunctionCall"):
         return True
+    if getattr(content, "type", None) == "function_call":
+        return True
     return bool(getattr(content, "name", None)) and not getattr(content, "text", None)
 
 from app.agent_service import AgentService, ChatTurn, StatusItem, TextItem
@@ -33,16 +35,15 @@ from app.settings import settings as _settings
 
 
 class AgentFrameworkRunner:
-    """AgentRunner implementation backed by Microsoft agent-framework-openai v1.2.0."""
+    """AgentRunner implementation backed by Microsoft agent-framework-openai."""
 
     def __init__(self, chat_client: OpenAIChatCompletionClient) -> None:
         self._client = chat_client
 
-    # Assumes agent.run_stream yields incremental updates that expose .text (a
-    # text delta) and .contents (which may include a function-call content
-    # carrying .name). Tool-call detection is via _is_function_call (duck-typed)
-    # so it does not depend on importing a specific content class. The unit suite
-    # exercises a stub runner instead.
+    # agent-framework >=1.8 streams via agent.run(..., stream=True) (ResponseStream);
+    # older builds exposed agent.run_stream. Updates expose .text (text delta) and
+    # .contents (which may include function-call items with .name). Tool-call detection
+    # is duck-typed via _is_function_call so we don't depend on a specific content class.
     async def run_stream(self, *, instructions, tools, messages):
         wrapped_tools = [tool(fn) for fn in tools]
         agent = self._client.as_agent(
@@ -51,8 +52,12 @@ class AgentFrameworkRunner:
         af_messages = [
             Message(role=t.role, contents=[Content.from_text(t.content)]) for t in messages
         ]
+        if hasattr(agent, "run_stream"):
+            stream = agent.run_stream(af_messages)
+        else:
+            stream = agent.run(af_messages, stream=True)
         seen_tools: set[str] = set()
-        async for update in agent.run_stream(af_messages):
+        async for update in stream:
             for content in getattr(update, "contents", []) or []:
                 if _is_function_call(content):
                     name = getattr(content, "name", "") or ""
