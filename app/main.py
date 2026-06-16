@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.agent_service import (
     AgentService, StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent, ErrorEvent,
+    StreamEvent,
 )
 from app.errors import AgentServiceError
 from app.schema import (
@@ -81,7 +82,7 @@ _EVENT_NAMES = {
 }
 
 
-def _sse_frame(event: object) -> str:
+def _sse_frame(event: StreamEvent) -> str:
     name = _EVENT_NAMES[type(event)]
     payload = json.dumps(event.__dict__, ensure_ascii=False)
     return f"event: {name}\ndata: {payload}\n\n"
@@ -103,8 +104,15 @@ async def message(
                 yield _sse_frame(ev)
         except AgentServiceError as e:
             yield _sse_frame(ErrorEvent(message=str(e)))
+        except Exception:  # noqa: BLE001 - never leave the client with a truncated, frame-less stream
+            logging.exception("Unexpected error while streaming agent reply")
+            yield _sse_frame(ErrorEvent(message="Đã xảy ra lỗi khi xử lý yêu cầu."))
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/v1/review")

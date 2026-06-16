@@ -3,13 +3,14 @@ import httpx
 import pytest
 
 from app.main import app, get_agent_service
-from app.agent_service import StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent
+from app.agent_service import StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent, ErrorEvent
 
 
 class StubStreamService:
-    def __init__(self, events=None, raises=None):
+    def __init__(self, events=None, raises=None, raise_after=None):
         self._events = events or []
         self._raises = raises
+        self._raise_after = raise_after  # exception to raise after yielding events
         self.seen = None
 
     async def stream_message(self, *, jwt, session_id, user_text):
@@ -18,6 +19,8 @@ class StubStreamService:
             raise self._raises
         for ev in self._events:
             yield ev
+        if self._raise_after:
+            raise self._raise_after
 
 
 @pytest.fixture
@@ -103,3 +106,37 @@ async def test_empty_bearer_token_is_401(use_service):
     )
     assert r.status_code == 401
     assert r.json()["success"] is False
+
+
+async def test_agent_service_error_midstream_emits_error_frame(use_service):
+    from app.errors import UpstreamError
+    use_service(StubStreamService(
+        events=[DeltaEvent(text="partial")],
+        raise_after=UpstreamError("upstream boom"),
+    ))
+    r = await _request(
+        "POST", "/api/v1/message",
+        json={"session_id": "cs_1", "message": "x"},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert r.status_code == 200
+    frames = _parse_sse(r.text)
+    assert ("delta", {"text": "partial"}) in frames
+    assert ("error", {"message": "upstream boom"}) in frames
+
+
+async def test_unexpected_error_midstream_emits_generic_error_frame(use_service):
+    use_service(StubStreamService(
+        events=[DeltaEvent(text="partial")],
+        raise_after=RuntimeError("kaboom"),
+    ))
+    r = await _request(
+        "POST", "/api/v1/message",
+        json={"session_id": "cs_1", "message": "x"},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert r.status_code == 200
+    frames = _parse_sse(r.text)
+    assert ("delta", {"text": "partial"}) in frames
+    # generic message, not the raw exception text
+    assert any(ev == "error" and "kaboom" not in data["message"] for ev, data in frames)
