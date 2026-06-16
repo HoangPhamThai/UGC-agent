@@ -5,6 +5,9 @@ parse/persistence uses extract_artifact() on the full accumulated text."""
 
 _START = '<<<ARTIFACT'
 _END = '<<<END ARTIFACT>>>'
+# `_START` intentionally omits the title header so any `<<<ARTIFACT` opens
+# suppression; `_END` is the full closing sentinel. An unterminated block is
+# dropped on flush (display-only; the authoritative parse runs separately).
 
 
 def _longest_prefix_suffix(buf: str, token: str) -> int:

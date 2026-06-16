@@ -42,3 +42,15 @@ def test_lone_triple_angle_that_is_not_an_artifact_is_kept():
 
 def test_unterminated_artifact_block_is_dropped_on_flush():
     assert run([f"x {START} never closes"]) == "x "
+
+
+def test_end_marker_split_across_chunks_while_suppressing():
+    assert run(["pre ", START, "data <<<END ", "ARTIFACT>>> post"]) == "pre  post"
+
+
+def test_two_artifact_blocks_in_one_stream_both_removed():
+    assert run([f"a {BLOCK} b {BLOCK} c"]) == "a  b  c"
+
+
+def test_held_back_partial_start_that_is_plain_text_is_emitted():
+    assert run(["abc<<<ARTIFA", "Bcd done"]) == "abc<<<ARTIFABcd done"
