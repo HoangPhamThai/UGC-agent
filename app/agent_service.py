@@ -22,12 +22,6 @@ class ReplyArtifact:
     markdown: str
 
 
-@dataclass(frozen=True)
-class AgentReply:
-    text: str
-    artifact: Optional[ReplyArtifact]
-
-
 # --- streaming run protocol (framework-agnostic) ----------------------------
 
 @dataclass(frozen=True)
