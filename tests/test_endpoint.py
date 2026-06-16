@@ -1,10 +1,9 @@
 import json
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from app.main import app, get_agent_service
 from app.agent_service import StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent
-from app.errors import UnauthorizedError
 
 
 class StubStreamService:
@@ -22,17 +21,18 @@ class StubStreamService:
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
 def use_service():
     def _set(svc):
         app.dependency_overrides[get_agent_service] = lambda: svc
         return svc
     yield _set
     app.dependency_overrides.clear()
+
+
+async def _request(method, path, *, json=None, headers=None):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.request(method, path, json=json, headers=headers or {})
 
 
 def _parse_sse(text):
@@ -51,27 +51,27 @@ def _parse_sse(text):
     return frames
 
 
-def test_health(client):
-    r = client.get("/health")
+async def test_health():
+    r = await _request("GET", "/health")
     assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
-def test_message_requires_bearer_before_streaming(client, use_service):
+async def test_message_requires_bearer_before_streaming(use_service):
     use_service(StubStreamService())
-    r = client.post("/api/v1/message", json={"session_id": "cs_1", "message": "hi"})
+    r = await _request("POST", "/api/v1/message", json={"session_id": "cs_1", "message": "hi"})
     assert r.status_code == 401
     assert r.json()["success"] is False
 
 
-def test_message_streams_sse_frames(client, use_service):
+async def test_message_streams_sse_frames(use_service):
     stub = use_service(StubStreamService(events=[
         StatusEvent(label="Đang tổng hợp số liệu…"),
         DeltaEvent(text="42 articles"),
         ArtifactEvent(title="T6", markdown="| 42 |"),
         DoneEvent(session_id="cs_1"),
     ]))
-    r = client.post(
-        "/api/v1/message",
+    r = await _request(
+        "POST", "/api/v1/message",
         json={"session_id": "cs_1", "message": "how many?"},
         headers={"Authorization": "Bearer jwt-xyz"},
     )
@@ -87,17 +87,17 @@ def test_message_streams_sse_frames(client, use_service):
     assert stub.seen == ("jwt-xyz", "cs_1", "how many?")
 
 
-def test_message_bad_body_is_422(client, use_service):
+async def test_message_bad_body_is_422(use_service):
     use_service(StubStreamService())
-    r = client.post("/api/v1/message", json={"session_id": "cs_1"}, headers={"Authorization": "Bearer x"})
+    r = await _request("POST", "/api/v1/message", json={"session_id": "cs_1"}, headers={"Authorization": "Bearer x"})
     assert r.status_code == 422
     assert r.json()["success"] is False
 
 
-def test_empty_bearer_token_is_401(client, use_service):
+async def test_empty_bearer_token_is_401(use_service):
     use_service(StubStreamService())
-    r = client.post(
-        "/api/v1/message",
+    r = await _request(
+        "POST", "/api/v1/message",
         json={"session_id": "cs_1", "message": "hi"},
         headers={"Authorization": "Bearer "},
     )
