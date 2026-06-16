@@ -5,7 +5,9 @@ from datetime import datetime
 from typing import AsyncIterator, Callable, Optional, Protocol, Union, runtime_checkable
 from zoneinfo import ZoneInfo
 
+from app.artifact_stream_filter import ArtifactStreamFilter
 from app.prompts import render_system_prompt
+from app.tool_labels import GENERATING_LABEL, label_for_tool
 from app.tools import build_tools
 
 _ARTIFACT_RE = re.compile(
@@ -71,6 +73,9 @@ class ErrorEvent:
     message: str
 
 
+StreamEvent = Union[StatusEvent, DeltaEvent, ArtifactEvent, DoneEvent, ErrorEvent]
+
+
 def extract_artifact(reply: str) -> tuple[str, Optional[ReplyArtifact]]:
     """Pull a sentinel-delimited statistics artifact out of the LLM reply.
     Returns (clean_text_without_block, artifact_or_None). If no complete block is
@@ -123,12 +128,10 @@ class AgentService:
 
     async def stream_message(
         self, *, jwt: str, session_id: str, user_text: str
-    ) -> AsyncIterator[object]:
+    ) -> AsyncIterator[StreamEvent]:
         """Stream one turn as domain events: StatusEvent / DeltaEvent /
         ArtifactEvent / DoneEvent / ErrorEvent. Persists the clean assistant
         text only on normal completion; the interim key is always revoked."""
-        from app.artifact_stream_filter import ArtifactStreamFilter
-        from app.tool_labels import GENERATING_LABEL, label_for_tool
 
         key, _expires = await self.backend.issue_interim_key(jwt)
         try:
